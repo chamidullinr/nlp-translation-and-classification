@@ -1,16 +1,14 @@
 from transformers import AutoTokenizer
 
 
+__all__ = ['BaseTransformer']
+
+
 class BaseTransformer:
     def __init__(self, pretrained_checkpoint):
         self.pretrained_checkpoint = pretrained_checkpoint
         self.tokenizer = AutoTokenizer.from_pretrained(pretrained_checkpoint)
         self.model = None
-
-    # def __new__(cls, *args, **kwargs):
-    #     if cls is BaseTransformer:
-    #         raise TypeError('Base class "BaseTransformer" may not be instantiated.')
-    #     return object.__new__(cls, *args, **kwargs)
 
     def __str__(self):
         return f'{self.__class__.__name__}({self.pretrained_checkpoint})'
@@ -32,3 +30,12 @@ class BaseTransformer:
     @property
     def config(self):
         return self.model.config if self.model is not None else None
+
+    def predict_sample(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def tokenize_dataset(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def predict(self, *args, **kwargs):
+        raise NotImplementedError

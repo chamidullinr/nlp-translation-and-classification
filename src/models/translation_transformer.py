@@ -1,16 +1,22 @@
+import math
+import time
+
 import torch
 import torch.nn.functional as F
-from transformers import (AutoModelForSeq2SeqLM,
-                          DataCollatorForSeq2Seq, Seq2SeqTrainingArguments, Seq2SeqTrainer)
+from transformers import AutoModelForSeq2SeqLM
 from transformers.trainer import logger
 from transformers.trainer_pt_utils import torch_pad_and_concatenate as concat
 
 from src.torch_utils import torch_isin
-from src.data_classes import TranslationOutput
 from .base_transformer import BaseTransformer
+from .training_mixin import Seq2seqTrainingMixin
+from .model_outputs import TranslationOutput
 
 
-class TranslationTransformer(BaseTransformer):
+__all__ = ['TranslationTransformer']
+
+
+class TranslationTransformer(BaseTransformer, Seq2seqTrainingMixin):
     SKIP_PROB_TOK = -1
 
     def __init__(self, pretrained_checkpoint):
@@ -35,76 +41,27 @@ class TranslationTransformer(BaseTransformer):
         return logits, probs
 
     def predict_sample(self, x, output_probs=False, *,
-                       max_inp_length=128, max_trg_length=128, **kwargs):
+                       max_inp_length=None, max_trg_length=None, **kwargs):
         """Run network inference and generate predicted output as text."""
-        input_ids = self.tokenizer(
+        model_input = self.tokenizer(
             x, return_tensors='pt', max_length=max_inp_length,
-            truncation=True, padding=True).input_ids
-        input_ids = input_ids.to(self.model.device)
+            truncation=True, padding=True)
+        model_input = model_input.to(self.model.device)
         logits, probs = self._generate(
-            input_ids, output_probs, max_length=max_trg_length, **kwargs)
+            **model_input, output_probs=output_probs, max_length=max_trg_length, **kwargs)
         decoded = self.tokenizer.batch_decode(logits, skip_special_tokens=True)
         if len(decoded) == 1:
             decoded = decoded[0]
         out = decoded if probs is None else (decoded, probs)
         return out
 
-    def get_trainer(self, output_dir, train_dataset=None, eval_dataset=None, *,
-                    no_epochs=1, bs=64, gradient_accumulation_steps=1,
-                    lr=2e-5, wd=0.01, lr_scheduler_type='linear', fp16=False,
-                    compute_metrics_cb=None, num_workers=0, resume_from_checkpoint=None,
-                    metric_for_best_model=None, greater_is_better=None,
-                    seed=42, log_level='passive', disable_tqdm=False):
-        """
-        Get the trainer object for training and evaluating the network
-        for given training and validation datasets.
-        """
-        # define training arguments
-        args = Seq2SeqTrainingArguments(
-            output_dir=output_dir,
-            evaluation_strategy='epoch',  # evaluation is done at the end of each epoch
-            per_device_train_batch_size=bs,
-            per_device_eval_batch_size=bs,
-            gradient_accumulation_steps=gradient_accumulation_steps,
-            num_train_epochs=no_epochs,
-            learning_rate=lr,
-            weight_decay=wd,
-            lr_scheduler_type=lr_scheduler_type,
-            save_total_limit=1,
-            load_best_model_at_end=True,
-            metric_for_best_model=metric_for_best_model,
-            greater_is_better=greater_is_better,
-            predict_with_generate=True,
-            fp16=fp16,  # fp16 is not optimized on the current AWS GPU instance
-            dataloader_num_workers=num_workers,
-            resume_from_checkpoint=resume_from_checkpoint,
-            seed=seed,
-            log_level=log_level,
-            disable_tqdm=disable_tqdm,
-            report_to='none')
-
-        # create data collator for splitting the data into batches
-        data_collator = DataCollatorForSeq2Seq(self.tokenizer, model=self.model)
-
-        # create trainer instance
-        trainer = Seq2SeqTrainer(
-            self.model,
-            args,
-            train_dataset=train_dataset,
-            eval_dataset=eval_dataset,
-            data_collator=data_collator,
-            tokenizer=self.tokenizer,
-            compute_metrics=compute_metrics_cb)
-
-        return trainer
-
     def tokenize_dataset(self, datasets, *, inp_feature='inp', trg_feature='trg',
-                         max_inp_length=128, max_trg_length=128, prefix=None, prefix_col=None):
+                         max_inp_length=None, max_trg_length=None, prefix=None, prefix_col=None):
         """Tokenize dataset with input and target records before feeding them into the network."""
         def tokenize_records(records):
             inp = ['' if x is None else str(x) for x in records[inp_feature]]
             if prefix is not None:
-                inp = [f'{pref} {x}' for x in inp]
+                inp = [f'{prefix} {x}' for x in inp]
             elif prefix_col is not None and prefix_col in records:
                 inp = [f'{pref} {x}' for x, pref in zip(inp, records[prefix_col])]
             model_inputs = self.tokenizer(inp, max_length=max_inp_length, truncation=True)
@@ -129,6 +86,8 @@ class TranslationTransformer(BaseTransformer):
 
         # create PyTorch dataloader
         dataloader = trainer.get_test_dataloader(test_dataset)
+
+        start_time = time.time()
 
         # get model
         model = trainer._wrap_model(trainer.model, training=False)
@@ -183,4 +142,15 @@ class TranslationTransformer(BaseTransformer):
         if labels_all is not None:
             labels_all = labels_all.numpy()
 
-        return TranslationOutput(predictions=logits_all, label_ids=labels_all, probs=probs_all)
+        # compute metrics
+        runtime = time.time() - start_time
+        num_samples = len(test_dataset)
+        num_steps = math.ceil(num_samples / bs)
+        samples_per_second = num_samples / runtime
+        steps_per_second = num_steps / runtime
+        metrics = {
+            'test_runtime': round(runtime, 4),
+            'test_samples_per_second': round(samples_per_second, 3),
+            'test_steps_per_second': round(steps_per_second, 3)}
+
+        return TranslationOutput(predictions=logits_all, label_ids=labels_all, probs=probs_all, metrics=metrics)

@@ -1,6 +1,6 @@
 import numpy as np
 
-from .data_classes import TranslationOutput
+from .models.model_outputs import TranslationOutput
 
 
 def get_combined_probs(prediction_out: TranslationOutput, skip_prob_tok=-1):

@@ -14,7 +14,7 @@ def concat_datasets(datasets1, datasets2):
     return out
 
 
-def _add_column_to_dataset(dataset: Dataset, name, value, replace_if_exists=False):
+def _add_column_to_dataset(dataset: Dataset, name, value):
     if isinstance(value, (list, np.ndarray)):
         out = dataset.add_column(name, value)
     else:
