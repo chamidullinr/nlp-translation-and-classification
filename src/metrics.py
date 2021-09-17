@@ -1,3 +1,5 @@
+from typing import Iterable
+
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score
 
@@ -16,21 +18,43 @@ def f1(pred: np.array, targ: np.array, labels=None):
     return f1_score(targ, pred, labels=labels, average='macro')
 
 
-def text_accuracy(a: str, b: str):
-    return int(a == b)
+def text_accuracy(a: [str, Iterable], b: [str, Iterable]):
+    def metric(_a, _b):
+        return int(_a == _b)
+    
+    if isinstance(a, str) and isinstance(b, str):
+        out = metric(a, b)
+    else:
+        out = np.mean([metric(_a, _b) for _a, _b in zip(a, b)])
+    return out
 
 
-def levenshtein_ratio(a: str, b: str):
+def levenshtein_score(a: [str, Iterable], b: [str, Iterable]):
     import stringdist
-    return 1 - stringdist.levenshtein_norm(a, b)
+
+    def metric(_a, _b):
+        return 1 - stringdist.levenshtein_norm(_a, _b)
+
+    if isinstance(a, str) and isinstance(b, str):
+        out = metric(a, b)
+    else:
+        out = np.mean([metric(_a, _b) for _a, _b in zip(a, b)])
+    return out
 
 
-def jaccard_index(a: str, b: str):
-    label_1 = set(a.split(' ')) if not isinstance(a, list) else set(a)
-    label_2 = set(b.split(' ')) if not isinstance(b, list) else set(b)
-    union_len = len(label_1.union(label_2))
-    intersection_len = len(label_1.intersection(label_2))
-    return intersection_len / union_len
+def jaccard_index(a: [str, Iterable], b: [str, Iterable]):
+    def metric(_a, _b):
+        label_1 = set(_a.split(' ')) if not isinstance(_a, list) else set(_a)
+        label_2 = set(_b.split(' ')) if not isinstance(_b, list) else set(_b)
+        union_len = len(label_1.union(label_2))
+        intersection_len = len(label_1.intersection(label_2))
+        return intersection_len / union_len
+
+    if isinstance(a, str) and isinstance(b, str):
+        out = metric(a, b)
+    else:
+        out = np.mean([metric(_a, _b) for _a, _b in zip(a, b)])
+    return out
 
 
 class ClassificationMetricsCallback:
@@ -47,7 +71,7 @@ class ClassificationMetricsCallback:
 
 
 class TranslationMetricsCallback:
-    def __init__(self, tokenizer, metrics=[text_accuracy, levenshtein_ratio, jaccard_index]):
+    def __init__(self, tokenizer, metrics=[text_accuracy, levenshtein_score, jaccard_index]):
         self.tokenizer = tokenizer
         self.metrics = metrics
 
@@ -68,9 +92,6 @@ class TranslationMetricsCallback:
         decoded_labels = [x.strip() for x in decoded_labels]
 
         # compute metrics
-        out = {}
-        for met in self.metrics:
-            out[met.__name__] = np.mean(
-                [met(a, b) for a, b in zip(decoded_preds, decoded_labels)])
+        out = {met.__name__: met(decoded_preds, decoded_labels) for met in self.metrics}
 
         return out

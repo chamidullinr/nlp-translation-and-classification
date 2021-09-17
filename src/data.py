@@ -3,7 +3,7 @@ from datasets import Dataset, DatasetDict, concatenate_datasets
 
 from sklearn.preprocessing import LabelEncoder
 
-from .metrics import accuracy, levenshtein_ratio, jaccard_index
+from .metrics import text_accuracy, levenshtein_score, jaccard_index
 from . import translation_utils
 
 
@@ -51,7 +51,7 @@ def encode_column(datasets: [Dataset, DatasetDict], name):
 
 
 def create_predictions_df(tokenizer, dataset: Dataset, prediction_out, *,
-                          trg_feature='trg', metrics=[accuracy, levenshtein_ratio, jaccard_index]):
+                          trg_feature='trg', metrics=[text_accuracy, levenshtein_score, jaccard_index]):
     """Create DataFrame with predictions and targets. And evaluate metrics."""
     assert hasattr(prediction_out, 'predictions')
 
